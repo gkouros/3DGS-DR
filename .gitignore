@@ -16,3 +16,4 @@ video_bp_files
 videos
 visual_train
 ref_nerf_envs
+logs
