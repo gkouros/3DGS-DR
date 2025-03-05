@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -13,7 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch.autograd import Variable
 from torchvision.transforms import GaussianBlur
-from kornia.filters import bilateral_blur
+# from kornia.filters import bilateral_blur
 from math import exp
 
 def l1_loss(network_output, gt):
@@ -65,16 +65,16 @@ def _ssim(img1, img2, window, window_size, channel, size_average=True):
         return ssim_map.mean(1).mean(1).mean(1)
 
 # im: 3,H,W, with grad
-def bilateral_smooth_img_loss(im: torch.Tensor):
-    REFL_THRESH = 0.05
-    im = im.mean(dim = 0) # H,W
-    msk = im > REFL_THRESH
-    if not torch.any(msk): return 0
-    cim = im.detach().clone()
-    cim[~msk] = -999999.0 # make non refl area huge different with the refl area, so that the bilateral_blur won't blur pixel out of the refl area boundary
-    smoothed_im = bilateral_blur(cim[None,None], (11,11), 75/255, (10,10))[0,0]
-    loss = l2_loss(im[msk], smoothed_im[msk])
-    return loss
+# def bilateral_smooth_img_loss(im: torch.Tensor):
+#     REFL_THRESH = 0.05
+#     im = im.mean(dim = 0) # H,W
+#     msk = im > REFL_THRESH
+#     if not torch.any(msk): return 0
+#     cim = im.detach().clone()
+#     cim[~msk] = -999999.0 # make non refl area huge different with the refl area, so that the bilateral_blur won't blur pixel out of the refl area boundary
+#     smoothed_im = bilateral_blur(cim[None,None], (11,11), 75/255, (10,10))[0,0]
+#     loss = l2_loss(im[msk], smoothed_im[msk])
+#     return loss
 
 # im: 3,H,W, with grad
 gBlur = None
