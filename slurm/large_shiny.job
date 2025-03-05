@@ -1,0 +1,31 @@
+#!/bin/bash -l
+
+#SBATCH --cluster=genius
+#SBATCH --job-name="dr.shiny"
+#SBATCH --nodes=1
+#SBATCH --mem=24G
+#SBATCH -t 0-23:59:00
+#SBATCH --account=lcomputervision
+#SBATCH --partition=gpu_p100
+#SBATCH --gpus-per-node=1
+#SBATCH --output=/scratch/leuven/354/vsc35496/slurm_logs/RefGS/%x-%j.log
+#SBATCH --mail-type=FAIL,END
+#SBATCH --mail-user=georgios.kouros@kuleuven.be
+
+DIR=/data/leuven/354/vsc35496/projects/nerf-repos/refgs
+cd ${DIR}
+echo $DIR
+echo "Received args: $ARGS"
+
+#run local file
+apptainer exec --nv \
+	--bind /etc/ssl/certs:/etc/ssl/certs \
+	--bind /etc/pki/ca-trust/extracted/pem/:/etc/pki/ca-trust/extracted/pem/ \
+	--bind /data/leuven/354/vsc35496/apptainer_home:/user/leuven/354/vsc35496/ \
+	--bind /data/leuven/354/vsc35496:/data/leuven/354/vsc35496/ \
+	--bind /scratch/leuven/354/vsc35496:/scratch/leuven/354/vsc35496 \
+	cuda12.6.sif \
+	bash -c "
+		source /data/leuven/354/vsc35496/apptainer_home/miniconda3/bin/activate && \
+		conda activate rgs && \
+		python train_shiny.py && python eval_shiny.py"
