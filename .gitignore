@@ -17,3 +17,5 @@ videos
 visual_train
 ref_nerf_envs
 logs
+slurm
+*.sif
