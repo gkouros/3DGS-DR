@@ -17,13 +17,17 @@ from lpipsPyTorch import get_lpips_model
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background, save_ims):
     if save_ims:
-        render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
-        #gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
-        color_path = os.path.join(render_path, 'rgb')
+        render_path = os.path.join(model_path, name, "ours_{}".format(iteration))
+        gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
+        color_path = os.path.join(render_path, 'render')
         normal_path = os.path.join(render_path, 'normal')
+        refl_path = os.path.join(render_path, 'refl')
+        base_color_path = os.path.join(render_path, 'base_color')
         makedirs(color_path, exist_ok=True)
         makedirs(normal_path, exist_ok=True)
-        #makedirs(gts_path, exist_ok=True)
+        makedirs(refl_path, exist_ok=True)
+        makedirs(base_color_path, exist_ok=True)
+        makedirs(gts_path, exist_ok=True)
 
     LPIPS = get_lpips_model(net_type='vgg').cuda()
     ssims = []
@@ -35,13 +39,17 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         ltres = render_env_map(gaussians)
         torchvision.utils.save_image(ltres['env_cood1'], os.path.join(model_path, 'light1.png'))
         torchvision.utils.save_image(ltres['env_cood2'], os.path.join(model_path, 'light2.png'))
+
+    # evaluate and save views
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
         view.refl_mask = None # when evaluating, refl mask is banned
         t1 = time.time()
         rendering = render(view, gaussians, pipeline, background)
         render_time = time.time() - t1
-        
+
         render_color = rendering["render"][None]
+        refl_strength = rendering["refl_strength_map"][None]
+        base_color = rendering["base_color_map"][None]
         gt = view.original_image[None, 0:3, :, :]
 
         ssims.append(ssim(render_color, gt).item())
@@ -52,8 +60,11 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         if save_ims:
             normal_map = rendering['normal_map'] * 0.5 + 0.5
             torchvision.utils.save_image(render_color, os.path.join(color_path, '{0:05d}.png'.format(idx)))
+            torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}.png'.format(idx)))
+            torchvision.utils.save_image(refl_strength, os.path.join(refl_path, 'refl_strength_{0:05d}.png'.format(idx)))
+            torchvision.utils.save_image(base_color, os.path.join(base_color_path, 'base_color_{0:05d}.png'.format(idx)))
             torchvision.utils.save_image(normal_map, os.path.join(normal_path, '{0:05d}.png'.format(idx)))
-    
+
     ssim_v = np.array(ssims).mean()
     psnr_v = np.array(psnrs).mean()
     lpip_v = np.array(lpipss).mean()
@@ -85,6 +96,6 @@ if __name__ == "__main__":
     print("Rendering " + args.model_path)
 
     # Initialize system state (RNG)
-    safe_state(args.quiet)
+    # safe_state(args.quiet)
 
     render_sets(model.extract(args), args.iteration, pipeline.extract(args), args.save_images)
