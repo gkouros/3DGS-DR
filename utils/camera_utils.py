@@ -19,7 +19,7 @@ WARNED = False
 
 def loadCam(args, id, cam_info, resolution_scale):
     orig_w, orig_h = cam_info.image.size
-    HWK = None
+    K = cam_info.K.copy() if cam_info.K is not None else None
 
     if args.resolution in [1, 2, 4, 8]:
         resolution = round(orig_w/(resolution_scale * args.resolution)), round(orig_h/(resolution_scale * args.resolution))
@@ -40,9 +40,9 @@ def loadCam(args, id, cam_info, resolution_scale):
         scale = float(global_down) * float(resolution_scale)
         resolution = (int(orig_w / scale), int(orig_h / scale))
         if cam_info.K is not None:
-            K = cam_info.K.copy()
             K[:2] = K[:2] * scale
-            HWK = (resolution[1], resolution[0], K)
+
+    HWK = (resolution[1], resolution[0], K)
 
     resized_image_rgb = PILtoTorch(cam_info.image, resolution)
 
