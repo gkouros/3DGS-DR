@@ -1,3 +1,5 @@
+#!/bin/bash
+set -e
 python -u train.py -s data/glossy_synthetic/angel  -m logs/baseline/glossy_synthetic/angel   --eval --iterations 61000 --white_background --longer_prop_iter 36_000
 python -u train.py -s data/glossy_synthetic/bell   -m logs/baseline/glossy_synthetic/bell    --eval --iterations 91000 --white_background --longer_prop_iter 48_000  --opac_lr0_interval 0
 python -u train.py -s data/glossy_synthetic/cat    -m logs/baseline/glossy_synthetic/cat     --eval --iterations 61000 --white_background

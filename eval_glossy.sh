@@ -1,3 +1,5 @@
+#!/bin/bash
+set -e
 python -u eval.py -m logs/baseline/glossy_synthetic/angel  --save_images
 python -u eval.py -m logs/baseline/glossy_synthetic/bell   --save_images
 python -u eval.py -m logs/baseline/glossy_synthetic/cat    --save_images
