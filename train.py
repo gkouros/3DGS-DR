@@ -3,9 +3,10 @@ import os
 import torch
 from random import randint
 from utils.loss_utils import l1_loss, ssim
-from gaussian_renderer import render, render_env_map
+from gaussian_renderer import render, render_env_map, network_gui2
 import sys
 from scene import Scene, GaussianModel
+from scene.cameras import Camera
 from utils.general_utils import safe_state
 import uuid
 import cv2, time
@@ -33,16 +34,18 @@ densify -> 30k
 densify_intv in prop -> 100
 '''
 
-def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from):
+def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, server=None):
+    network_gui2.try_connect()
+
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
-    
+
     INIT_UNITIL_ITER = opt.init_until_iter #3000
     FR_OPTIM_FROM_ITER = opt.feature_rest_from_iter
     NORMAL_PROP_UNTIL_ITER = opt.normal_prop_until_iter + opt.longer_prop_iter #24_000
     OPAC_LR0_INTERVAL = opt.opac_lr0_interval # 200
     DENSIFIDATION_INTERVAL_WHEN_PROP = opt.densification_interval_when_prop #500
-    
+
     TOT_ITER = opt.iterations + opt.longer_prop_iter + 1
     DENSIFY_UNTIL_ITER = opt.densify_until_iter + opt.longer_prop_iter
 
@@ -91,7 +94,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     #ENV_CENTER = torch.tensor([-0.032,0.808,0.751], device='cuda') # None
     #ENV_RANGE = 2.138
 
-    while iteration < TOT_ITER:        
+    while iteration < TOT_ITER:
 
         iter_start.record()
 
@@ -119,7 +122,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
         # Loss
         Ll1 = l1_loss(image, gt_image)
         loss = (1.0 - opt.lambda_dssim) * Ll1 + opt.lambda_dssim * (1.0 - ssim(image, gt_image))
-        
+
 
         def get_outside_msk():
             return None if not USE_ENV_SCOPE else \
@@ -138,7 +141,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
-                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
+                progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f} #points: {len(gaussians.get_xyz)}"})
                 progress_bar.update(10)
             if iteration == TOT_ITER:
                 progress_bar.close()
@@ -164,13 +167,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 else:
                     opacity_reset_intval = 3000
                     densification_interval = 100
-                
+
                 if iteration > opt.densify_from_iter and iteration % densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
                     gaussians.densify_and_prune(
-                        opt.densify_grad_threshold, 
-                        opt.prune_opacity_threshold, 
-                        scene.cameras_extent, size_threshold, 
+                        opt.densify_grad_threshold,
+                        opt.prune_opacity_threshold,
+                        scene.cameras_extent, size_threshold,
                     )
 
                 HAS_RESET0 = False
@@ -200,7 +203,86 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
         iteration += 1
 
-def prepare_output_and_logger(args):    
+        if server is None:
+            continue
+
+        render_type = network_gui2.on_gui_change()
+        with torch.no_grad():
+            client = server["client"]
+            RT_w2v = viser.transforms.SE3(wxyz_xyz=np.concatenate([client.camera.wxyz, client.camera.position], axis=-1)).inverse()
+            R = torch.tensor(RT_w2v.rotation().as_matrix().astype(np.float32)).numpy()
+            T = torch.tensor(RT_w2v.translation().astype(np.float32)).numpy()
+            FoVx = viewpoint_cam.FoVx
+            FoVy = viewpoint_cam.FoVy
+
+            camera = Camera(
+                colmap_id=None,
+                R=R,
+                T=T,
+                FoVx=FoVx,
+                FoVy=FoVy,
+                image=gt_image,
+                gt_alpha_mask = None,
+                image_name="",
+                uid=None,
+                HWK=viewpoint_cam.HWK,
+            )
+
+            # render and extract outputs
+            render_pkg = render(camera, gaussians, pipe, background, initial_stage=initial_stage)
+            image = render_pkg["render"]
+            if not initial_stage:
+                normal_map  = render_pkg['normal_map']
+                base_color_map = render_pkg['base_color_map']
+                refl_strength_map = render_pkg['refl_strength_map']
+                envmaps = render_env_map(scene.gaussians)
+
+            output = None
+            if initial_stage or render_type == "rendered color":
+                image = torch.clamp(image, 0.0, 1.0)
+                rendered_image = image.detach().cpu().permute(1, 2, 0)
+                rendered_image = rendered_image * 255
+                rendered_image = rendered_image.byte().numpy()
+                output = rendered_image
+            elif not initial_stage and render_type == "base color":
+                image = torch.clamp(base_color_map, 0.0, 1.0)
+                rendered_image = image.detach().cpu().permute(1, 2, 0)
+                rendered_image = rendered_image * 255
+                rendered_image = rendered_image.byte().numpy()
+                output = rendered_image
+            elif not initial_stage and render_type == "refl strength":
+                image = torch.clamp(refl_strength_map, 0.0, 1.0).repeat(3,1,1)
+                rendered_image = image.detach().cpu().permute(1, 2, 0)
+                rendered_image = rendered_image * 255
+                rendered_image = rendered_image.byte().numpy()
+                output = rendered_image
+            elif not initial_stage and render_type == "render normal":
+                rendered_image = (normal_map.detach().cpu().permute(1, 2, 0) + 1)/2
+                rendered_image = rendered_image * 255
+                rendered_image = rendered_image.byte().numpy()
+                output = rendered_image
+            elif not initial_stage and render_type == "envmap cood1":
+                image = envmaps['env_cood1']
+                rendered_image = image.detach().cpu()
+                rendered_image = gamma_tonemap(rendered_image) * 255
+                rendered_image = rendered_image.byte().numpy()
+                output = rendered_image
+            elif not initial_stage and render_type == "envmap cood2":
+                image = envmaps['env_cood2']
+                rendered_image = image.detach().cpu()
+                rendered_image = gamma_tonemap(rendered_image) * 255
+                rendered_image = rendered_image.byte().numpy()
+                output = rendered_image
+            else:
+                print(f"Unsupported render type: {render_type}")
+
+            client.scene.set_background_image(
+                output,
+                format="jpeg"
+            )
+
+
+def prepare_output_and_logger(args):
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
@@ -208,7 +290,7 @@ def prepare_output_and_logger(args):
             unique_str = str(uuid.uuid4())
         #args.model_path = os.path.join("./output/", unique_str[0:10])
         args.model_path = os.path.join("./output/", os.path.basename(args.source_path))
-        
+
     # Set up output folder
     print("Output folder: {}".format(args.model_path))
     os.makedirs(args.model_path, exist_ok = True)
@@ -233,14 +315,14 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
     # Report test and samples of training set
     if iteration % 10_000 == 0:
         torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()}, 
+        validation_configs = ({'name': 'test', 'cameras' : scene.getTestCameras()},
                               {'name': 'train', 'cameras' : [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in range(5, 30, 5)]})
 
         env_res = render_env_map(scene.gaussians)
         for env_name in env_res.keys():
             if tb_writer:
                 tb_writer.add_image("#envmap/{}".format(env_name), env_res[env_name], global_step=iteration)
-        
+
         for config in validation_configs:
             if config['cameras'] and len(config['cameras']) > 0:
                 l1_test = 0.0
@@ -254,14 +336,14 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
                             if 'map' in maps_name:
                                 if 'normal' in maps_name:
                                      res[maps_name] = res[maps_name]*0.5+0.5
-                                tb_writer.add_image(config['name'] + "_view_{}/{}".format(viewpoint.image_name, maps_name), res[maps_name], global_step=iteration)    
+                                tb_writer.add_image(config['name'] + "_view_{}/{}".format(viewpoint.image_name, maps_name), res[maps_name], global_step=iteration)
                         tb_writer.add_image(config['name'] + "_view_{}/2_render".format(viewpoint.image_name), image, global_step=iteration)
                         if iteration == 10_000:
                             tb_writer.add_image(config['name'] + "_view_{}/1_ground_truth".format(viewpoint.image_name), gt_image, global_step=iteration)
                     l1_test += l1_loss(image, gt_image).mean().double()
                     psnr_test += psnr(image, gt_image).mean().double()
                 psnr_test /= len(config['cameras'])
-                l1_test /= len(config['cameras'])          
+                l1_test /= len(config['cameras'])
                 print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
                 if tb_writer:
                     tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
@@ -270,7 +352,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, elapsed, testing_i
         if tb_writer:
             tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
             #tb_writer.add_scalar("refl_gauss_ratio", scene.gaussians.get_refl_strength_to_total.item(), iteration)
-            
+
         torch.cuda.empty_cache()
 
 if __name__ == "__main__":
@@ -283,20 +365,30 @@ if __name__ == "__main__":
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int, default=[7_000, 30_000])
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[7_000, 15_000, 30_000, 60_000, 100_000, 150_000])
+    parser.add_argument("--gui", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--checkpoint_iterations", nargs="+", type=int, default=[])
     parser.add_argument("--start_checkpoint", type=str, default = None)
     args = parser.parse_args(sys.argv[1:])
     args.save_iterations.append(args.iterations)
-    
+
     print("Optimizing " + args.model_path)
 
+    # Start GUI server, configure and run training
+    if args.gui:
+        import viser
+        server = network_gui2.init()
+    else:
+        server = None
+
     # Initialize system state (RNG)
-    safe_state(args.quiet)
+    # safe_state(args.quiet)
 
     # Start GUI server, configure and run training
-    torch.autograd.set_detect_anomaly(args.detect_anomaly)
-    training(lp.extract(args), op.extract(args), pp.extract(args), args.test_iterations, args.save_iterations, args.checkpoint_iterations, args.start_checkpoint, args.debug_from)
+    # torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    training(lp.extract(args), op.extract(args), pp.extract(args),
+             args.test_iterations, args.save_iterations, args.checkpoint_iterations,
+             args.start_checkpoint, args.debug_from, server)
 
     # All done
     print("\nTraining complete.")

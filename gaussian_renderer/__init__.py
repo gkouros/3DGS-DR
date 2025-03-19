@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -13,7 +13,7 @@ import torch
 import math, time
 import torch.nn.functional as F
 import diff_gaussian_rasterization_c3
-import diff_gaussian_rasterization_c7 
+import diff_gaussian_rasterization_c7
 from scene.gaussian_model import GaussianModel
 from utils.sh_utils import eval_sh
 from utils.general_utils import sample_camera_rays, get_env_rayd1, get_env_rayd2
@@ -45,8 +45,8 @@ def render_env_map(pc: GaussianModel):
 
 def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, scaling_modifier = 1.0, initial_stage = False, more_debug_infos = False):
     """
-    Render the scene. 
-    
+    Render the scene.
+
     Background tensor (bg_color) must be on GPU!
     """
     # Create zero tensor. We will use it to make pytorch return gradients of the 2D (screen-space) means
@@ -78,7 +78,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
             debug=pipe.debug
         )
         return raster_settings
-    
+
     # init rasterizer with various channels
     Setting_c3 = diff_gaussian_rasterization_c3.GaussianRasterizationSettings
     Setting_c7 = diff_gaussian_rasterization_c7.GaussianRasterizationSettings
@@ -91,7 +91,7 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     scales = pc.get_scaling
     rotations = pc.get_rotation
     shs = pc.get_features
-    
+
     bg_map_const = bg_color[:,None,None].cuda().expand(3, imH, imW)
     #bg_map_zero = torch.zeros_like(bg_map_const)
 
@@ -128,15 +128,15 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         rotations = rotations,
         cov3D_precomp = None,
         bg_map = bg_map)
-    
+
     base_color = out_ts[:3,...] # 3,H,W
+    normal_map = out_ts[3:6,...]
     refl_strength = out_ts[6:7,...] #
-    normal_map = out_ts[3:6,...] 
 
     normal_map = normal_map.permute(1,2,0)
     normal_map = normal_map / (torch.norm(normal_map, dim=-1, keepdim=True)+1e-6)
     refl_color = get_refl_color(pc.get_envmap, viewpoint_camera.HWK, viewpoint_camera.R, viewpoint_camera.T, normal_map)
-    
+
     final_image = (1-refl_strength) * base_color + refl_strength * refl_color
 
     results = {
@@ -149,5 +149,5 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
         "visibility_filter" : _radii > 0,
         "radii": _radii
     }
-        
+
     return results
