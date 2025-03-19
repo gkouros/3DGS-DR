@@ -17,6 +17,7 @@ from utils.image_utils import psnr
 import torchvision
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
+from general_utils import gamma_tonemap
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -256,7 +257,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 rendered_image = rendered_image * 255
                 rendered_image = rendered_image.byte().numpy()
                 output = rendered_image
-            elif not initial_stage and render_type == "render normal":
+            elif not initial_stage and render_type == "normal":
                 rendered_image = (normal_map.detach().cpu().permute(1, 2, 0) + 1)/2
                 rendered_image = rendered_image * 255
                 rendered_image = rendered_image.byte().numpy()

@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -179,17 +179,17 @@ def get_env_rayd1(H,W):
 
 env_rayd2 = None
 def init_envrayd2(H,W):
-    gy, gx = torch.meshgrid(torch.linspace( 0.0 + 1.0 / H, 1.0 - 1.0 / H, H, device='cuda'), 
+    gy, gx = torch.meshgrid(torch.linspace( 0.0 + 1.0 / H, 1.0 - 1.0 / H, H, device='cuda'),
                             torch.linspace(-1.0 + 1.0 / W, 1.0 - 1.0 / W, W, device='cuda'),
                             # indexing='ij')
                             )
-    
+
     sintheta, costheta = torch.sin(gy*np.pi), torch.cos(gy*np.pi)
     sinphi, cosphi     = torch.sin(gx*np.pi), torch.cos(gx*np.pi)
-    
+
     reflvec = torch.stack((
-        sintheta*sinphi, 
-        costheta, 
+        sintheta*sinphi,
+        costheta,
         -sintheta*cosphi
         ), dim=-1)
     global env_rayd2
@@ -204,7 +204,7 @@ pixel_camera = None
 def sample_camera_rays(HWK, R, T):
     H,W,K = HWK
     R = R.T # NOTE!!! the R rot matrix is transposed save in 3DGS
-    
+
     global pixel_camera
     if pixel_camera is None or pixel_camera.shape[0] != H:
         K = K.astype(np.float32)
@@ -221,3 +221,21 @@ def sample_camera_rays(HWK, R, T):
     rays_d = rays_d / torch.norm(rays_d, dim=1, keepdim=True)
     rays_d = rays_d.reshape(H,W,3)
     return rays_d
+
+
+def gamma_tonemap(color, gamma=2.2):
+    """Apply gamma tonemapping to an HDR color tensor.
+
+    Args:
+        color (torch.Tensor): Input HDR color tensor in the range [0,1].
+        gamma (float): Gamma correction value (default 2.2 for sRGB).
+
+    Returns:
+        torch.Tensor: Tonemapped color tensor.
+    """
+    if isinstance(color, torch.Tensor):
+        return torch.clamp(color ** (1.0 / gamma), 0, 1)
+    elif isinstance(color, np.ndarray):
+        return np.clip(color ** (1.0 / gamma), 0, 1)
+    else:
+        raise RuntimeWarning(f"gamma_tonemap is not defined for type {type(color)}")
