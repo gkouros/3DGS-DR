@@ -17,7 +17,7 @@ from utils.image_utils import psnr
 import torchvision
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
-from general_utils import gamma_tonemap
+from utils.general_utils import gamma_tonemap
 try:
     from torch.utils.tensorboard import SummaryWriter
     TENSORBOARD_FOUND = True
@@ -232,11 +232,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
             # render and extract outputs
             render_pkg = render(camera, gaussians, pipe, background, initial_stage=initial_stage)
             image = render_pkg["render"]
+            envmaps = render_env_map(scene.gaussians)
             if not initial_stage:
                 normal_map  = render_pkg['normal_map']
                 base_color_map = render_pkg['base_color_map']
                 refl_strength_map = render_pkg['refl_strength_map']
-                envmaps = render_env_map(scene.gaussians)
 
             output = None
             if initial_stage or render_type == "rendered color":
@@ -264,13 +264,13 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 output = rendered_image
             elif not initial_stage and render_type == "envmap cood1":
                 image = envmaps['env_cood1']
-                rendered_image = image.detach().cpu()
+                rendered_image = image.detach().cpu().permute(1, 2, 0)
                 rendered_image = gamma_tonemap(rendered_image) * 255
                 rendered_image = rendered_image.byte().numpy()
                 output = rendered_image
             elif not initial_stage and render_type == "envmap cood2":
                 image = envmaps['env_cood2']
-                rendered_image = image.detach().cpu()
+                rendered_image = image.detach().cpu().permute(1, 2, 0)
                 rendered_image = gamma_tonemap(rendered_image) * 255
                 rendered_image = rendered_image.byte().numpy()
                 output = rendered_image
