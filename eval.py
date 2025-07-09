@@ -50,8 +50,8 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
 
     if args.save_images: # save env light
         ltres = render_env_map(gaussians)
-        torchvision.utils.save_image(gamma_tonemap(ltres['env_cood1']), os.path.join(model_path, name, "ours_{}".format(iteration), 'light1.png'))
-        torchvision.utils.save_image(gamma_tonemap(ltres['env_cood2']), os.path.join(model_path, name, "ours_{}".format(iteration), 'light2.png'))
+        torchvision.utils.save_image(ltres['env_cood1']), os.path.join(model_path, name, "ours_{}".format(iteration), 'light1.png')
+        torchvision.utils.save_image(ltres['env_cood2']), os.path.join(model_path, name, "ours_{}".format(iteration), 'light2.png')
 
     # evaluate and save views
     for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
