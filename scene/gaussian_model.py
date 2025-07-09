@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -33,7 +33,7 @@ class GaussianModel:
             actual_covariance = L @ L.transpose(1, 2)
             symm = strip_symmetric(actual_covariance)
             return symm
-        
+
         self.scaling_activation = torch.exp
         self.scaling_inverse_activation = torch.log
 
@@ -50,7 +50,7 @@ class GaussianModel:
     # init_refl_v: do not need to be set when rendering
     def __init__(self, sh_degree = -1):
         self.active_sh_degree = 0
-        self.max_sh_degree = sh_degree 
+        self.max_sh_degree = sh_degree
         self._xyz = torch.empty(0)
         self._init_xyz = torch.empty(0)
         self._scaling = torch.empty(0)
@@ -87,20 +87,20 @@ class GaussianModel:
             self.optimizer.state_dict(),
             self.spatial_lr_scale,
         )
-    
+
     def restore(self, model_args, training_args):
-        (self.active_sh_degree, 
-        self._xyz, 
-        self._scaling, 
-        self._rotation, 
+        (self.active_sh_degree,
+        self._xyz,
+        self._scaling,
+        self._rotation,
         self._opacity,
         self._refl_strength,
         self._features_dc,
         self._features_rest,
-        self.max_radii2D, 
-        xyz_gradient_accum, 
+        self.max_radii2D,
+        xyz_gradient_accum,
         denom,
-        opt_dict, 
+        opt_dict,
         self.spatial_lr_scale) = model_args
         self.training_setup(training_args)
         self.xyz_gradient_accum = xyz_gradient_accum
@@ -115,38 +115,38 @@ class GaussianModel:
     @property
     def get_scaling(self):
         return self.scaling_activation(self._scaling)
-    
+
     @property
     def get_rotation(self):
         return self.rotation_activation(self._rotation)
-    
+
     @property
     def get_xyz(self):
         return self._xyz
-    
+
     @property
     def get_opacity(self):
         return self.opacity_activation(self._opacity)
-    
+
     @property
     def get_refl(self):
         return self.refl_activation(self._refl_strength)
-    
+
     @property
     def get_features(self):
         features_dc = self._features_dc
         features_rest = self._features_rest
         return torch.cat((features_dc, features_rest), dim=1)
-    
+
     @property
-    def get_envmap(self): # 
+    def get_envmap(self): #
         return self.env_map
-    
+
     @property
     def get_refl_strength_to_total(self):
         refl = self.get_refl
         return (refl>0.1).sum() / refl.shape[0]
-    
+
     def get_sh_color(self, cam_o, ret_dir_pp = False):
         shs_view = self.get_features.transpose(1, 2).view(-1, 3, (self.max_sh_degree+1)**2)
         dir_pp = (self.get_xyz - cam_o.repeat(self.get_features.shape[0], 1))
@@ -155,7 +155,7 @@ class GaussianModel:
         sh_color = torch.clamp_min(sh2rgb + 0.5, 0.0)
         if ret_dir_pp: return sh_color, dir_pp_normalized
         else: return sh_color
-    
+
     def get_depth(self, proj_mat):
         pts = self.get_xyz
         cpts = torch.cat([pts, torch.ones(pts.shape[0], 1).cuda()], dim=-1)
@@ -163,7 +163,7 @@ class GaussianModel:
         tpts = tpts[:,:3] #/ tpts[:,3:]
         z = tpts[:, 2:3]#*0.5 + 0.5
         return z
-    
+
     def get_min_axis(self, cam_o):
         pts = self.get_xyz
         p2o = cam_o[None] - pts
@@ -224,7 +224,7 @@ class GaussianModel:
         self._refl_strength = nn.Parameter(tot_props['refl'].requires_grad_(True))
         self._features_dc = nn.Parameter(tot_props['shs'][:,:,0:1].transpose(1, 2).contiguous().requires_grad_(True))
         self._features_rest = nn.Parameter(tot_props['shs'][:,:,1:].transpose(1, 2).contiguous().requires_grad_(True))
-        
+
         env_map = CubemapEncoder(output_dim=3, resolution=cubemap_resol)
         self.env_map = env_map.cuda()
 
@@ -249,7 +249,7 @@ class GaussianModel:
         self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
         ###
         #self.optimizer.add_param_group({'params': self.mlp.parameters(), 'lr': training_args.mlp_lr, "name": "mlp"})
-        
+
         self.xyz_scheduler_args = get_expon_lr_func(lr_init=training_args.position_lr_init*self.spatial_lr_scale,
                                                     lr_final=training_args.position_lr_final*self.spatial_lr_scale,
                                                     lr_delay_mult=training_args.position_lr_delay_mult,
@@ -302,7 +302,7 @@ class GaussianModel:
         if self.env_map is not None:
             save_path = path.replace('.ply', '.map')
             torch.save(self.env_map.state_dict(), save_path)
-                
+
 
     def reset_opacity0(self):
         RESET_V = 0.01
@@ -392,7 +392,7 @@ class GaussianModel:
             scale_new = scales*rmin_axis
             scale_new[refl_msk] = scales[refl_msk]
         return scale_new
-    
+
     def enlarge_refl_scales_strategy2(self, ret_raw = True, ENLARGE_SCALE=1.36, REFL_MSK_THR = 0.02, exclusive_msk = None):
         refl_msk = self.get_refl.flatten() < REFL_MSK_THR
         if exclusive_msk is not None:
@@ -458,8 +458,7 @@ class GaussianModel:
         #    self.mlp.load_state_dict(torch.load(mlp_path))
         map_path = path.replace('.ply', '.map')
         if os.path.exists(map_path):
-            self.env_map = CubemapEncoder(output_dim=3, resolution=128).cuda()
-            self.env_map.load_state_dict(torch.load(map_path))
+            self.load_envmap(map_path)
 
         self._xyz = nn.Parameter(torch.tensor(xyz, dtype=torch.float, device="cuda").requires_grad_(True))
         self._features_dc = nn.Parameter(torch.tensor(features_dc, dtype=torch.float, device="cuda").transpose(1, 2).contiguous().requires_grad_(True))
@@ -468,6 +467,10 @@ class GaussianModel:
         self._opacity = nn.Parameter(torch.tensor(opacities, dtype=torch.float, device="cuda").requires_grad_(True))
         self._scaling = nn.Parameter(torch.tensor(scales, dtype=torch.float, device="cuda").requires_grad_(True))
         self._rotation = nn.Parameter(torch.tensor(rots, dtype=torch.float, device="cuda").requires_grad_(True))
+
+    def load_envmap(self, map_path):
+            self.env_map = CubemapEncoder(output_dim=3, resolution=128).cuda()
+            self.env_map.load_state_dict(torch.load(map_path))
 
     def replace_tensor_to_optimizer(self, tensor, name):
         optimizable_tensors = {}
@@ -597,7 +600,7 @@ class GaussianModel:
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
                                               torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
-        
+
         new_xyz = self._xyz[selected_pts_mask]
         new_features_dc = self._features_dc[selected_pts_mask]
         new_features_rest = self._features_rest[selected_pts_mask]

@@ -90,7 +90,7 @@ class CubemapEncoder(nn.Module):
         self.seamless = 1
 
         self.params = nn.ParameterDict({
-            'Cubemap_texture': nn.Parameter(torch.rand(6, self.output_dim, resolution, resolution)*10-5), 
+            'Cubemap_texture': nn.Parameter(torch.rand(6, self.output_dim, resolution, resolution)*10-5),
             'Cubemap_failv': nn.Parameter(torch.zeros(self.output_dim))
         })
         self.n_elems = 6 * self.output_dim * resolution * resolution + self.output_dim
@@ -101,6 +101,15 @@ class CubemapEncoder(nn.Module):
     def forward(self, inputs):
         outputs = cubemap_encode(inputs, self.params['Cubemap_texture'], self.params['Cubemap_failv'], self.interp_id, self.seamless)
         return outputs.permute(1,0) # CxN -> NxC
+
+    def set_faces(self, faces, fail_value):
+        with torch.no_grad():
+            self.params = nn.ParameterDict({
+                'Cubemap_texture': nn.Parameter(faces),
+                'Cubemap_failv': nn.Parameter(fail_value),
+            })
+
+
 
 
 class MipCubemapEncoder(nn.Module):

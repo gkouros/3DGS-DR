@@ -15,6 +15,7 @@ from datetime import datetime
 import numpy as np
 import random
 import open3d as o3d
+import math
 
 def inverse_sigmoid(x):
     return torch.log(x/(1-x))
@@ -149,13 +150,13 @@ def get_pencoding_len(dim, order):
     return dim*(1+2*order)
 
 def write2ply_norgb(pts, save_path):
-  rgbs = np.ones_like(pts)
-  pcd = o3d.geometry.PointCloud()
-  pcd.points = o3d.utility.Vector3dVector(pts)
-  pcd.colors = o3d.utility.Vector3dVector(rgbs)
-  print('write ply file...')
-  o3d.io.write_point_cloud(save_path, pcd, write_ascii=True)
-  print('point cloud generate complete')
+    rgbs = np.ones_like(pts)
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(pts)
+    pcd.colors = o3d.utility.Vector3dVector(rgbs)
+    print('write ply file...')
+    o3d.io.write_point_cloud(save_path, pcd, write_ascii=True)
+    print('point cloud generate complete')
 
 # env_map: 16,7
 env_rayd1 = None
@@ -195,9 +196,11 @@ def init_envrayd2(H,W):
     global env_rayd2
     env_rayd2 = reflvec
 
-def get_env_rayd2(H,W):
-    if env_rayd2 is None:
-        init_envrayd2(H,W)
+def get_env_rayd2(H, W):
+    global env_rayd2
+    # re-init if shape mismatches or first call
+    if env_rayd2 is None or env_rayd2.shape[0] != H or env_rayd2.shape[1] != W:
+        init_envrayd2(H, W)
     return env_rayd2
 
 pixel_camera = None
@@ -239,3 +242,69 @@ def gamma_tonemap(color, gamma=2.2):
         return np.clip(color ** (1.0 / gamma), 0, 1)
     else:
         raise RuntimeWarning(f"gamma_tonemap is not defined for type {type(color)}")
+
+import numpy as np, math
+
+def make_cubemap_faces(equi_map, face_size):
+    H, W, _ = equi_map.shape
+
+    # shoot rays at the same centers as get_env_rayd2
+    vs = np.linspace(-1 + 1/face_size, 1 - 1/face_size, face_size)
+    yy, xx = np.meshgrid(vs, vs, indexing='ij')
+
+    faces = []
+    face_specs = [
+        # name,    u_axis,           v_axis,       face_center
+        ('+X', np.array([ 0,  0, -1]), np.array([0, -1,  0]), np.array([ 1,  0,  0])),
+        ('-X', np.array([ 0,  0,  1]), np.array([0, -1,  0]), np.array([-1,  0,  0])),
+        ('+Y', np.array([ 1,  0,  0]), np.array([0,  0, 1]), np.array([0,1,0])),
+        ('-Y', np.array([ 1,  0,  0]), np.array([0,  0, 1]), np.array([0,-1,0])),
+        # ('+Y', np.array([ 1,  0,  0]), np.array([0,  0,  -1]), np.array([ 0,  -1,  0])),
+        # ('-Y', np.array([ 1,  0,  0]), np.array([0,  0, -1]), np.array([ 0, 1,  0])),
+        ('+Z', np.array([ 1,  0,  0]), np.array([0, -1,  0]), np.array([ 0,  0,  1])),
+        ('-Z', np.array([-1,  0,  0]), np.array([0, -1,  0]), np.array([ 0,  0, -1])),
+    ]
+
+    for name, u_axis, v_axis, center in face_specs:
+        # 1) build ray directions
+        dirs = center[None,None,:] \
+             + xx[:,:,None]*u_axis[None,None,:] \
+             + yy[:,:,None]*v_axis[None,None,:]
+        dirs = dirs / np.linalg.norm(dirs, axis=-1, keepdims=True)
+        dx, dy, dz = dirs[...,0], dirs[...,1], dirs[...,2]
+
+        # 2) spherical coords
+        theta = np.arccos(np.clip(dy, -1, 1))   # [0, π]
+        # *** FIXED φ ***
+        phi   = np.arctan2(dx, -dz)             # invert your get_env_rayd2 convention!
+
+        # 3) map into pixel coords with a -0.5 texel shift
+        u = (phi   / (2*math.pi) + 0.5) * W - 0.5
+        v = (theta / math.pi)          * H - 0.5
+
+        # 4) bilinear sample
+        i0 = np.floor(u).astype(int); j0 = np.floor(v).astype(int)
+        i1 = np.minimum(i0+1, W-1);      j1 = np.minimum(j0+1, H-1)
+        wu = u - i0;                      wv = v - j0
+
+        c00 = equi_map[j0, i0]; c10 = equi_map[j0, i1]
+        c01 = equi_map[j1, i0]; c11 = equi_map[j1, i1]
+
+        # w00 = ((1-wu)*(1-wv))[...,None]
+        # w10 = ((   wu)*(1-wv))[...,None]
+        # w01 = ((1-wu)*(   wv))[...,None]
+        # w11 = ((   wu)*(   wv))[...,None]
+        # faces.append(c00*w00 + c10*w10 + c01*w01 + c11*w11)
+
+        face = (
+             c00 * ((1-wu)*(1-wv))[..., None] +
+             c10 * ((  wu)*(1-wv))[..., None] +
+             c01 * ((1-wu)*(  wv))[..., None] +
+             c11 * ((  wu)*(  wv))[..., None]
+        )
+        # the encoder assumes “LEFT_TOP_AS_ORIGIN” so flip each face vertically:
+        face = face[::-1, ...]     # flip along the image’s row axis
+        faces.append(face)
+
+    return np.stack(faces, axis=0)  # (6, face_size, face_size, 3)
+

@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -17,7 +17,7 @@ from utils.graphics_utils import getWorld2View2, getProjectionMatrix, getProject
 class Camera(nn.Module):
     def __init__(self, colmap_id, R, T, FoVx, FoVy, image, gt_alpha_mask,
                  image_name, uid,
-                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0, 
+                 trans=np.array([0.0, 0.0, 0.0]), scale=1.0,
                  data_device = "cuda", HWK = None, gt_refl_mask = None
                  ):
         super(Camera, self).__init__()
@@ -48,9 +48,11 @@ class Camera(nn.Module):
             self.image_height = self.original_image.shape[1]
 
             if gt_alpha_mask is not None:
+                self.gt_alpha_mask = gt_alpha_mask
                 self.original_image *= gt_alpha_mask.to(self.data_device)
             else:
                 self.original_image *= torch.ones((1, self.image_height, self.image_width), device=self.data_device)
+                self.gt_alpha_mask = torch.ones((1, self.image_height, self.image_width), device=self.data_device)
 
         self.zfar = 100.0
         self.znear = 0.01
@@ -73,7 +75,7 @@ class Camera(nn.Module):
 class MiniCam:
     def __init__(self, width, height, fovy, fovx, znear, zfar, world_view_transform, full_proj_transform):
         self.image_width = width
-        self.image_height = height    
+        self.image_height = height
         self.FoVy = fovy
         self.FoVx = fovx
         self.znear = znear

@@ -3,7 +3,7 @@
 # GRAPHDECO research group, https://team.inria.fr/graphdeco
 # All rights reserved.
 #
-# This software is free for non-commercial, research and evaluation use 
+# This software is free for non-commercial, research and evaluation use
 # under the terms of the LICENSE.md file.
 #
 # For inquiries contact  george.drettakis@inria.fr
@@ -30,7 +30,7 @@ class Scene:
 
     gaussians : GaussianModel
 
-    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0]):
+    def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, shuffle=True, resolution_scales=[1.0], relight=True, no_cameras=False):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -50,9 +50,10 @@ class Scene:
 
         if os.path.exists(os.path.join(args.source_path, "sparse")): # load camera infos here
             scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval)
-        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
+        elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")) or \
+                (relight and os.path.exists(os.path.join(args.source_path, "transforms_test.json"))):
             print("Found transforms_train.json file, assuming Blender data set!")
-            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval)
+            scene_info = sceneLoadTypeCallbacks["Blender"](args.source_path, args.white_background, args.eval, relight=relight)
         else:
             assert False, "Could not recognize scene type!"
 
@@ -72,21 +73,22 @@ class Scene:
 
         if shuffle:
             random.shuffle(scene_info.train_cameras)  # Multi-res consistent random shuffling
-            random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
+            # random.shuffle(scene_info.test_cameras)  # Multi-res consistent random shuffling
 
-        self.cameras_extent = scene_info.nerf_normalization["radius"]
-        self.cameras_center = -scene_info.nerf_normalization['translate']
+        self.cameras_extent = scene_info.nerf_normalization["radius"] if not relight else None
+        self.cameras_center = -scene_info.nerf_normalization['translate'] if not relight else None
 
         rand_idx = None
         for resolution_scale in resolution_scales: # Load image here
-            print("Loading Training Cameras")
-            self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args)
-            if USE_LESS_TRAINING_IMAGE:
-                if rand_idx is None:
-                    rand_idx = np.array(range(len(self.train_cameras[resolution_scale])))
-                    #np.random.shuffle(rand_idx)
-                    rand_idx = rand_idx[:int(len(rand_idx)*USE_LESS_IMAGE_RATE)]
-                self.train_cameras[resolution_scale] = (np.array(self.train_cameras[resolution_scale])[rand_idx]).tolist()
+            if not relight:
+                print("Loading Training Cameras")
+                self.train_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.train_cameras, resolution_scale, args)
+                if USE_LESS_TRAINING_IMAGE:
+                    if rand_idx is None:
+                        rand_idx = np.array(range(len(self.train_cameras[resolution_scale])))
+                        #np.random.shuffle(rand_idx)
+                        rand_idx = rand_idx[:int(len(rand_idx)*USE_LESS_IMAGE_RATE)]
+                    self.train_cameras[resolution_scale] = (np.array(self.train_cameras[resolution_scale])[rand_idx]).tolist()
             print("Loading Test Cameras")
             self.test_cameras[resolution_scale] = cameraList_from_camInfos(scene_info.test_cameras, resolution_scale, args)
 
